@@ -1,130 +1,135 @@
 import streamlit as st
 import pandas as pd
 import os
+import zipfile
+import tempfile
+import shutil
+from io import BytesIO
 
-def process_csv_files(source_folder, output_folder):
+def process_and_zip_files(uploaded_zip_file):
     """
-    The core processing logic from your original script, adapted to yield
-    status updates for the Streamlit interface.
+    Extracts a zip file to a temporary location, runs the cleaning process,
+    and zips the cleaned results for download.
     """
-    # --- 1. Find all CSV files first to calculate total for progress bar ---
-    csv_files_to_process = []
-    for root, _, files in os.walk(source_folder):
-        for filename in files:
-            if filename.lower().endswith(".csv"):
-                csv_files_to_process.append(os.path.join(root, filename))
-    
-    total_files = len(csv_files_to_process)
-    if total_files == 0:
-        st.warning("⚠️ No CSV files found in the specified source folder.")
-        return
-
-    # --- 2. Setup Streamlit progress elements ---
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    log_container = st.expander("Processing Logs", expanded=True)
-
-    # --- 3. Main Processing Loop ---
-    for i, input_path in enumerate(csv_files_to_process):
-        filename = os.path.basename(input_path)
-        root = os.path.dirname(input_path)
+    # Create temporary directories for source and output
+    with tempfile.TemporaryDirectory() as temp_source_dir, tempfile.TemporaryDirectory() as temp_output_dir:
         
-        # Update progress bar and status text for the current file
-        progress_percentage = (i + 1) / total_files
-        progress_bar.progress(progress_percentage)
-        status_text.info(f"🔄 Processing file {i+1}/{total_files}: {filename}")
+        # --- 1. Extract the uploaded ZIP to the temporary source directory ---
+        with zipfile.ZipFile(uploaded_zip_file, 'r') as zip_ref:
+            zip_ref.extractall(temp_source_dir)
 
-        try:
-            # --- Create corresponding output directory ---
-            relative_path = os.path.relpath(root, source_folder)
-            output_dir = os.path.join(output_folder, relative_path)
-            os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, filename)
+        # --- 2. Find all CSV files to process for the progress bar ---
+        csv_files_to_process = []
+        for root, _, files in os.walk(temp_source_dir):
+            for filename in files:
+                if filename.lower().endswith(".csv"):
+                    csv_files_to_process.append(os.path.join(root, filename))
+        
+        total_files = len(csv_files_to_process)
+        if total_files == 0:
+            st.warning("⚠️ No CSV files were found inside the uploaded ZIP file.")
+            return None
 
-            log_container.write(f"--- Processing: {filename} ---")
+        # --- 3. Setup Streamlit progress elements ---
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        log_container = st.expander("Processing Logs", expanded=True)
 
-            # --- Stage 1: Manual File Reading and Cleaning ---
-            with open(input_path, "r", encoding="utf-16") as infile:
-                lines = infile.readlines()
+        # --- 4. Main Processing Loop (using your original logic) ---
+        for i, input_path in enumerate(csv_files_to_process):
+            filename = os.path.basename(input_path)
+            root = os.path.dirname(input_path)
             
-            initial_row_count = len(lines)
-            content_lines = lines[6:-2]  # Skip header and footer
-            
-            processed_data = []
-            for line in content_lines:
-                cleaned_line = line.strip().strip('"')
-                if cleaned_line:
-                    split_row = cleaned_line.split(",")
-                    processed_data.append(split_row)
-            
-            rows_after_skips = len(processed_data)
+            progress_percentage = (i + 1) / total_files
+            progress_bar.progress(progress_percentage)
+            status_text.info(f"🔄 Processing file {i+1}/{total_files}: {filename}")
 
-            if not processed_data:
-                log_container.warning(f"File '{filename}' is empty after skipping header/footer. Skipping.")
-                continue
+            try:
+                # Create corresponding output directory
+                relative_path = os.path.relpath(root, temp_source_dir)
+                output_dir = os.path.join(temp_output_dir, relative_path)
+                os.makedirs(output_dir, exist_ok=True)
+                output_path = os.path.join(output_dir, filename)
 
-            # --- Stage 2: Pandas Processing ---
-            df = pd.DataFrame(processed_data)
-            df.dropna(how='any', inplace=True)
-            df.dropna(axis=1, how='all', inplace=True)
-            
-            final_row_count = len(df)
+                log_container.write(f"--- Processing: {filename} ---")
 
-            # Save the final cleaned DataFrame
-            df.to_csv(output_path, index=False, header=False, sep=',', encoding="utf-8")
-            
-            # Log detailed results to the expander
-            log_container.write(f"  - Initial rows: {initial_row_count}")
-            log_container.write(f"  - After skipping header/footer: {rows_after_skips}")
-            log_container.write(f"  - Final rows after cleanup: {final_row_count}")
-            log_container.success(f"✅ Saved to: {output_path}")
+                # Manual File Reading and Cleaning
+                with open(input_path, "r", encoding="utf-16", errors='ignore') as infile:
+                    lines = infile.readlines()
+                
+                content_lines = lines[6:-2]
+                
+                processed_data = []
+                for line in content_lines:
+                    cleaned_line = line.strip().strip('"')
+                    if cleaned_line:
+                        processed_data.append(cleaned_line.split(","))
+                
+                if not processed_data:
+                    log_container.warning(f"File '{filename}' is empty after cleaning. Skipping.")
+                    continue
 
-        except Exception as e:
-            log_container.error(f"❌ Error processing {filename}: {e}")
+                # Pandas Processing
+                df = pd.DataFrame(processed_data)
+                df.dropna(how='any', inplace=True)
+                df.dropna(axis=1, how='all', inplace=True)
+                
+                # Save the final cleaned DataFrame
+                df.to_csv(output_path, index=False, header=False, sep=',', encoding="utf-8")
+                
+                log_container.success(f"✅ Cleaned: {filename}")
 
-    status_text.success(f"🎉 All done! Processed {total_files} files.")
-    st.balloons()
+            except Exception as e:
+                log_container.error(f"❌ Error processing {filename}: {e}")
+
+        status_text.success(f"🎉 All done! Processed {total_files} files.")
+        st.balloons()
+
+        # --- 5. Create the output ZIP file from the temporary output directory ---
+        output_zip_buffer = BytesIO()
+        with zipfile.ZipFile(output_zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, _, files in os.walk(temp_output_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, temp_output_dir)
+                    zipf.write(file_path, arcname)
+        
+        output_zip_buffer.seek(0)
+        return output_zip_buffer
 
 
 # --- Streamlit App Interface ---
 
 st.set_page_config(page_title="CSV File Processor", layout="wide")
 
-st.title("📂 CSV File Processor")
+st.title("📂 CSV Folder Processor")
 st.markdown("""
-This app automates the cleaning of CSV files from a specified folder structure.
-1.  Enter the full path to the main **source folder** containing your raw CSV files.
-2.  Enter the full path to the **output folder** where cleaned files will be saved.
-3.  Click the **Start Processing** button.
-The app will maintain the original subfolder structure in the output directory.
+This app automates the cleaning of CSV files within a folder structure.
+1.  **ZIP your source folder** containing all the raw CSV files and subfolders.
+2.  **Upload the ZIP file** below.
+3.  The app will process all files, maintaining the original folder structure.
+4.  **Download the resulting ZIP file** containing the cleaned data.
 """)
 
-# --- User Inputs ---
-st.header("1. Configure Paths")
-source_folder = st.text_input(
-    "Enter the Source Folder Path:", 
-    "C:/Users/YourUser/Desktop/Raw_Data"
-)
-output_folder = st.text_input(
-    "Enter the Output Folder Path:", 
-    "C:/Users/YourUser/Desktop/Cleaned_Data"
+# --- User Upload ---
+st.header("1. Upload Your Data Folder")
+uploaded_zip = st.file_uploader(
+    "Choose a ZIP file", 
+    type="zip"
 )
 
-# --- Action Button and Logic ---
-st.header("2. Run the Processor")
-if st.button("🚀 Start Processing", type="primary"):
-    # Validate source path
-    if not os.path.isdir(source_folder):
-        st.error("The Source Folder path is not a valid directory. Please check it.")
-    elif not source_folder or not output_folder:
-        st.warning("Please provide both a source and an output folder path.")
-    else:
-        try:
-            # ✨ NEW: Create the output folder if it doesn't exist
-            os.makedirs(output_folder, exist_ok=True)
-            
-            with st.spinner('Processing files...'):
-                process_csv_files(source_folder, output_folder)
-        
-        except Exception as e:
-            st.error(f"An error occurred: {e}")
+# --- Processing and Download Logic ---
+if uploaded_zip is not None:
+    st.header("2. Processing Results")
+    with st.spinner('Extracting, cleaning, and re-zipping files... Please wait.'):
+        result_zip_buffer = process_and_zip_files(uploaded_zip)
+
+    if result_zip_buffer:
+        st.header("3. Download Cleaned Data")
+        st.download_button(
+            label="🚀 Download Cleaned_Data.zip",
+            data=result_zip_buffer,
+            file_name="Cleaned_Data.zip",
+            mime="application/zip",
+            type="primary"
+        )
