@@ -373,8 +373,8 @@ if uploaded_files:
 
     current_params = {
         'smooth_window': smooth_window, 'slope_window': slope_window,
-      #  'num_minima': num_minima, 'num_maxima': num_maxima,
-      #  'threshold_close': threshold_close, 'min_distance_between_minima': min_distance_between_minima,
+        'num_minima': num_minima, 'num_maxima': num_maxima,
+        'threshold_close': threshold_close, 'min_distance_between_minima': min_distance_between_minima,
         'window_length_ox': window_length_ox, 'window_length_red': window_length_red,
         'num_peaks_ox': 1, 'num_peaks_red': 1
     }
@@ -423,3 +423,4 @@ if uploaded_files:
 else:
 
     st.info("Please upload one or more CSV files to begin.")
+
