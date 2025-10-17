@@ -360,7 +360,7 @@ if uploaded_files:
     params_for_file = st.session_state.fixed_params.get(selected_filename, {}).copy()
 
     st.sidebar.subheader("Analysis Parameters")
-    smooth_window = st.sidebar.slider('Smooth Window', 3, 21, params_for_file.get('smooth_window', 11), 2)
+    smooth_window = st.sidebar.slider('Smooth Window', 3, 30, params_for_file.get('smooth_window', 11), 2)
     slope_window = st.sidebar.slider('Slope Window', 0.01, 0.5, params_for_file.get('slope_window', 0.1), 0.01)
     num_minima = st.sidebar.slider('Num Minima Candidates', 1, 200, params_for_file.get('num_minima', 100), 1)
     num_maxima = st.sidebar.slider('Num Maxima Candidates', 1, 200, params_for_file.get('num_maxima', 100), 1)
@@ -373,8 +373,8 @@ if uploaded_files:
 
     current_params = {
         'smooth_window': smooth_window, 'slope_window': slope_window,
-        'num_minima': num_minima, 'num_maxima': num_maxima,
-        'threshold_close': threshold_close, 'min_distance_between_minima': min_distance_between_minima,
+      #  'num_minima': num_minima, 'num_maxima': num_maxima,
+      #  'threshold_close': threshold_close, 'min_distance_between_minima': min_distance_between_minima,
         'window_length_ox': window_length_ox, 'window_length_red': window_length_red,
         'num_peaks_ox': 1, 'num_peaks_red': 1
     }
@@ -421,4 +421,5 @@ if uploaded_files:
             else:
                 st.warning("Could not generate summary data. Check files or parameters.")
 else:
+
     st.info("Please upload one or more CSV files to begin.")
