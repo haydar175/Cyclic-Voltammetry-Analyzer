@@ -360,7 +360,7 @@ if uploaded_files:
     params_for_file = st.session_state.fixed_params.get(selected_filename, {}).copy()
 
     st.sidebar.subheader("Analysis Parameters")
-    smooth_window = st.sidebar.slider('Smooth Window', 3, 30, params_for_file.get('smooth_window', 11), 2)
+    smooth_window = st.sidebar.slider('Smooth Window', 3, 21, params_for_file.get('smooth_window', 11), 2)
     slope_window = st.sidebar.slider('Slope Window', 0.01, 0.5, params_for_file.get('slope_window', 0.1), 0.01)
     num_minima = st.sidebar.slider('Num Minima Candidates', 1, 200, params_for_file.get('num_minima', 100), 1)
     num_maxima = st.sidebar.slider('Num Maxima Candidates', 1, 200, params_for_file.get('num_maxima', 100), 1)
