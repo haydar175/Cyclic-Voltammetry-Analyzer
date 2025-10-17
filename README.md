@@ -1,1 +1,1 @@
-# Demo
+# Cyclic Voltammetry Analyzer
