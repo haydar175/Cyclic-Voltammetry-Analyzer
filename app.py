@@ -10,52 +10,7 @@ import warnings
 from io import StringIO
 import re
 
-
-# Ignore common warnings for a cleaner output
 warnings.filterwarnings('ignore')
-
-# -----------------------------------------------------------------------------
-# MODIFIED HELPER FUNCTION
-# -----------------------------------------------------------------------------
-
-def extract_scan_rate_from_filename(filename):
-    """
-    Tries to find the scan rate from a filename based on a specific list.
-    
-    Checks if one of the last 4 parts of the filename (split by _, -, or space)
-    is a match in a predefined list of scan rates.
-    """
-    
-    # 1. Define the set of valid scan rate strings, exactly as requested.
-    SCAN_RATE_CANDIDATES = {
-        '0.1', '0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.9', 
-        '1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '1.9', '2.0'
-    }
-    
-    try:
-        # 2. Get filename parts (remove extension first)
-        filename_without_ext, _ = os.path.splitext(filename)
-        
-        # 3. Split by underscore, hyphen, or space
-        parts = re.split(r'[_ -]', filename_without_ext)
-        
-        # 4. Get the last 4 parts
-        last_four_parts = parts[-4:]
-        
-        # 5. Check for matches, starting from the end
-        for part in reversed(last_four_parts):
-            if part in SCAN_RATE_CANDIDATES:
-                return float(part) # Found it
-                
-    except Exception:
-        pass # If any part of this fails, just fall through to the default
-    
-    # 6. If no match is found, return 0.0
-    return 0.0
-
-# -----------------------------------------------------------------------------
-# CORE ANALYSIS FUNCTIONS (Unchanged logic, modified signature)
-# -----------------------------------------------------------------------------
 
 def compute_derivative(i_segment, v_segment):
     """Computes the first derivative (dI/dV)."""
@@ -76,7 +31,7 @@ def moving_average(signal, window_size=5):
     return np.convolve(padded, kernel, mode='valid')
 
 def compute_second_derivative(v_segment, first_derivative):
-    """Computes the second derivative (d²I/dV²)."""
+    """ComputES the second derivative (d²I/dV²)."""
     d2i_dv2 = np.diff(first_derivative) / np.diff(v_segment)
     v_mid2 = (v_segment[:-1] + v_segment[1:]) / 2
     return v_mid2, d2i_dv2
@@ -201,9 +156,14 @@ def analyze_file(file_content, filename,
     
     data = pd.read_csv(StringIO(file_content), engine='python').dropna()
     
-    # --- MODIFIED LOGIC: Use new helper function ---
-    # This replaces the old `float(filename.split('_')[7])`
-    extracted_value = extract_scan_rate_from_filename(filename)
+    # --- MODIFIED LOGIC: Use simple index-based logic ---
+    try:
+        # ==========================================================
+        # MODIFIED THIS LINE TO USE INDEX 6 AS REQUESTED
+        extracted_value = float(filename.split('_')[6])
+        # ==========================================================
+    except Exception:
+        extracted_value = 0.0
     # --- END MODIFIED LOGIC ---
 
     cycle_info = {'voltage': 10, 'current': 11, 'cycle_label': 'Cycle 6'}
@@ -503,5 +463,3 @@ if uploaded_files:
                 st.warning("Could not generate summary data. Check files or parameters.")
 else:
     st.info("Please upload one or more CSV files to begin.")
-
-
