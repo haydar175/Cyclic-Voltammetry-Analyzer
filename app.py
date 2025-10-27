@@ -1,5 +1,5 @@
 import streamlit as st
-import os
+import os  # <-- THIS IMPORT IS ADDED
 import numpy as np
 import pandas as pd
 from scipy.signal import argrelextrema
@@ -8,9 +8,50 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import warnings
 from io import StringIO
+import re
+
 
 # Ignore common warnings for a cleaner output
 warnings.filterwarnings('ignore')
+
+# -----------------------------------------------------------------------------
+# MODIFIED HELPER FUNCTION
+# -----------------------------------------------------------------------------
+
+def extract_scan_rate_from_filename(filename):
+    """
+    Tries to find the scan rate from a filename based on a specific list.
+    
+    Checks if one of the last 4 parts of the filename (split by _, -, or space)
+    is a match in a predefined list of scan rates.
+    """
+    
+    # 1. Define the set of valid scan rate strings, exactly as requested.
+    SCAN_RATE_CANDIDATES = {
+        '0.1', '0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.9', 
+        '1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '1.9', '2.0'
+    }
+    
+    try:
+        # 2. Get filename parts (remove extension first)
+        filename_without_ext, _ = os.path.splitext(filename)
+        
+        # 3. Split by underscore, hyphen, or space
+        parts = re.split(r'[_ -]', filename_without_ext)
+        
+        # 4. Get the last 4 parts
+        last_four_parts = parts[-4:]
+        
+        # 5. Check for matches, starting from the end
+        for part in reversed(last_four_parts):
+            if part in SCAN_RATE_CANDIDATES:
+                return float(part) # Found it
+                
+    except Exception:
+        pass # If any part of this fails, just fall through to the default
+    
+    # 6. If no match is found, return 0.0
+    return 0.0
 
 # -----------------------------------------------------------------------------
 # CORE ANALYSIS FUNCTIONS (Unchanged logic, modified signature)
@@ -151,7 +192,7 @@ def apply_baseline_correction(v_segment, i_segment, left_idx, right_idx):
 # -----------------------------------------------------------------------------
 @st.cache_data
 def analyze_file(file_content, filename,
-                 segment_pattern="A",  # <-- New argument
+                 segment_pattern="A",
                  smooth_window=7, slope_window=0.05,
                  num_minima=5, num_maxima=5, threshold_close=0.02,
                  min_distance_between_minima=0.03,
@@ -160,10 +201,10 @@ def analyze_file(file_content, filename,
     
     data = pd.read_csv(StringIO(file_content), engine='python').dropna()
     
-    try:
-        extracted_value = float(filename.split('_')[7])
-    except Exception:
-        extracted_value = 0.0
+    # --- MODIFIED LOGIC: Use new helper function ---
+    # This replaces the old `float(filename.split('_')[7])`
+    extracted_value = extract_scan_rate_from_filename(filename)
+    # --- END MODIFIED LOGIC ---
 
     cycle_info = {'voltage': 10, 'current': 11, 'cycle_label': 'Cycle 6'}
     results = []
@@ -171,16 +212,13 @@ def analyze_file(file_content, filename,
     voltage = data.iloc[:, cycle_info['voltage']].astype(float).values
     current = data.iloc[:, cycle_info['current']].astype(float).values
     
-    # --- MODIFIED LOGIC: Select segments based on pattern ---
     if segment_pattern == "A":
         segments = [(0, 109), (110, 210), (211, 317), (318, 399)] ### Pattern A
     elif segment_pattern == "B":
         segments = [(0, 99), (100, 199), (200, 299), (300, 399)] ### Pattern B
     else:
-        # Default to A if an invalid value is passed
         st.warning(f"Invalid pattern '{segment_pattern}'. Defaulting to 'A'.")
         segments = [(0, 109), (110, 210), (211, 317), (318, 399)] ### Pattern A
-    # --- END MODIFIED LOGIC ---
 
     ox_v = np.concatenate([voltage[s:e+1] for s, e in [segments[3], segments[0]]])
     ox_i = np.concatenate([current[s:e+1] for s, e in [segments[3], segments[0]]])
@@ -190,6 +228,7 @@ def analyze_file(file_content, filename,
     current_window_ox = window_length_ox + (extracted_value * 0.1)
     current_window_red = window_length_red + (extracted_value * 0.1)
     
+    # (The rest of the analysis logic is unchanged)
     ox_v_der1, ox_deriv1 = compute_derivative(ox_i, ox_v)
     ox_deriv1_smooth = moving_average(ox_deriv1, window_size=smooth_window)
     ox_v_der2, ox_deriv2 = compute_second_derivative(ox_v_der1, ox_deriv1_smooth)
@@ -329,10 +368,16 @@ def create_interactive_summary_plots(df):
 
     ox_label, red_label = "log(Avg Ox Peak)", "log(Avg Red Peak)"
     if len(avg_df) > 1:
-        ox_slope = stats.linregress(avg_df['log_scan_rate'], avg_df['log_ox_peak']).slope
-        ox_label = f'log(Avg Ox Peak) | Slope: {ox_slope:.3f}'
-        red_slope = stats.linregress(avg_df['log_scan_rate'], avg_df['log_red_peak']).slope
-        red_label = f'log(Avg Red Peak) | Slope: {red_slope:.3f}'
+        # Filter out inf/-inf before linregress
+        finite_ox_mask = np.isfinite(avg_df['log_scan_rate']) & np.isfinite(avg_df['log_ox_peak'])
+        finite_red_mask = np.isfinite(avg_df['log_scan_rate']) & np.isfinite(avg_df['log_red_peak'])
+
+        if finite_ox_mask.sum() > 1:
+            ox_slope = stats.linregress(avg_df.loc[finite_ox_mask, 'log_scan_rate'], avg_df.loc[finite_ox_mask, 'log_ox_peak']).slope
+            ox_label = f'log(Avg Ox Peak) | Slope: {ox_slope:.3f}'
+        if finite_red_mask.sum() > 1:
+            red_slope = stats.linregress(avg_df.loc[finite_red_mask, 'log_scan_rate'], avg_df.loc[finite_red_mask, 'log_red_peak']).slope
+            red_label = f'log(Avg Red Peak) | Slope: {red_slope:.3f}'
 
     # Changed mode from 'markers' to 'lines+markers'
     fig.add_trace(go.Scatter(x=df["Scan Rate (V/s)"], y=df["Ox Subtracted Peak"], mode='lines+markers', name='Ox Peaks', marker=dict(color='red')), row=1, col=1)
@@ -351,7 +396,7 @@ def create_interactive_summary_plots(df):
     return fig
 
 # -----------------------------------------------------------------------------
-# STREAMLIT USER INTERFACE (Modified)
+# STREAMLIT USER INTERFACE (Unchanged)
 # -----------------------------------------------------------------------------
 
 st.set_page_config(layout="wide")
@@ -458,3 +503,5 @@ if uploaded_files:
                 st.warning("Could not generate summary data. Check files or parameters.")
 else:
     st.info("Please upload one or more CSV files to begin.")
+
+
