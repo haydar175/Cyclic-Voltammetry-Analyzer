@@ -1,5 +1,3 @@
-# app.py (Summary plots now have connected points)
-
 import streamlit as st
 import os
 import numpy as np
@@ -15,7 +13,7 @@ from io import StringIO
 warnings.filterwarnings('ignore')
 
 # -----------------------------------------------------------------------------
-# CORE ANALYSIS FUNCTIONS (Unchanged)
+# CORE ANALYSIS FUNCTIONS (Unchanged logic, modified signature)
 # -----------------------------------------------------------------------------
 
 def compute_derivative(i_segment, v_segment):
@@ -148,8 +146,12 @@ def apply_baseline_correction(v_segment, i_segment, left_idx, right_idx):
         
     return corrected_i
 
+# -----------------------------------------------------------------------------
+# MODIFIED ANALYSIS FUNCTION
+# -----------------------------------------------------------------------------
 @st.cache_data
 def analyze_file(file_content, filename,
+                 segment_pattern="A",  # <-- New argument
                  smooth_window=7, slope_window=0.05,
                  num_minima=5, num_maxima=5, threshold_close=0.02,
                  min_distance_between_minima=0.03,
@@ -168,8 +170,18 @@ def analyze_file(file_content, filename,
 
     voltage = data.iloc[:, cycle_info['voltage']].astype(float).values
     current = data.iloc[:, cycle_info['current']].astype(float).values
+    
+    # --- MODIFIED LOGIC: Select segments based on pattern ---
+    if segment_pattern == "A":
+        segments = [(0, 109), (110, 210), (211, 317), (318, 399)] ### Pattern A
+    elif segment_pattern == "B":
+        segments = [(0, 99), (100, 199), (200, 299), (300, 399)] ### Pattern B
+    else:
+        # Default to A if an invalid value is passed
+        st.warning(f"Invalid pattern '{segment_pattern}'. Defaulting to 'A'.")
+        segments = [(0, 109), (110, 210), (211, 317), (318, 399)] ### Pattern A
+    # --- END MODIFIED LOGIC ---
 
-    segments = [(0, 109), (110, 210), (211, 317), (318, 399)]
     ox_v = np.concatenate([voltage[s:e+1] for s, e in [segments[3], segments[0]]])
     ox_i = np.concatenate([current[s:e+1] for s, e in [segments[3], segments[0]]])
     red_v = np.concatenate([voltage[s:e+1] for s, e in [segments[1], segments[2]]])
@@ -229,6 +241,10 @@ def analyze_file(file_content, filename,
         "window_length_ox": current_window_ox, "window_length_red": current_window_red
     })
     return results
+
+# -----------------------------------------------------------------------------
+# PLOTTING FUNCTIONS (Unchanged)
+# -----------------------------------------------------------------------------
 
 def create_interactive_plot(all_cycles_res, **kwargs):
     if not all_cycles_res:
@@ -290,7 +306,6 @@ def create_interactive_plot(all_cycles_res, **kwargs):
             fig.update_yaxes(title_text="Current (uA)", row=r, col=c)
     return fig
 
-### --- THIS IS THE MODIFIED FUNCTION --- ###
 def create_interactive_summary_plots(df):
     """Creates interactive Plotly graphs for peaks vs scan rate and sqrt(scan rate)."""
     # Sort by scan rate to ensure lines are drawn in the correct order
@@ -336,7 +351,7 @@ def create_interactive_summary_plots(df):
     return fig
 
 # -----------------------------------------------------------------------------
-# STREAMLIT USER INTERFACE (Unchanged)
+# STREAMLIT USER INTERFACE (Modified)
 # -----------------------------------------------------------------------------
 
 st.set_page_config(layout="wide")
@@ -357,10 +372,23 @@ if uploaded_files:
     
     selected_filename = st.sidebar.selectbox("Select a file to analyze:", file_names)
     
+    # Load the fixed parameters for the selected file, or use an empty dict
     params_for_file = st.session_state.fixed_params.get(selected_filename, {}).copy()
 
     st.sidebar.subheader("Analysis Parameters")
-    smooth_window = st.sidebar.slider('Smooth Window', 3, 31, params_for_file.get('smooth_window', 11), 2)
+
+    # --- NEW UI ELEMENT: Pattern Selection ---
+    # Get the default pattern from saved params, defaulting to 'A'
+    default_pattern = params_for_file.get('segment_pattern', 'A')
+    default_index = 0 if default_pattern == 'A' else 1
+    segment_pattern = st.sidebar.radio(
+        "Segmentation Pattern", ("A", "B"), 
+        index=default_index,
+        help="Select the data point segmentation pattern.\n- 'A': (0-109, 110-210, ...)\n- 'B': (0-99, 100-199, ...)"
+    )
+    # --- END NEW UI ELEMENT ---
+
+    smooth_window = st.sidebar.slider('Smooth Window', 3, 21, params_for_file.get('smooth_window', 11), 2)
     slope_window = st.sidebar.slider('Slope Window', 0.01, 0.5, params_for_file.get('slope_window', 0.1), 0.01)
     num_minima = st.sidebar.slider('Num Minima Candidates', 1, 200, params_for_file.get('num_minima', 100), 1)
     num_maxima = st.sidebar.slider('Num Maxima Candidates', 1, 200, params_for_file.get('num_maxima', 100), 1)
@@ -371,7 +399,9 @@ if uploaded_files:
     window_length_ox = st.sidebar.slider('Oxidation Window Length', 0.1, 1.0, params_for_file.get('window_length_ox', 0.6), 0.01)
     window_length_red = st.sidebar.slider('Reduction Window Length', 0.1, 1.0, params_for_file.get('window_length_red', 1.0), 0.01)
 
+    # Add the new segment_pattern to the dictionary of current parameters
     current_params = {
+        'segment_pattern': segment_pattern, # <-- Added
         'smooth_window': smooth_window, 'slope_window': slope_window,
         'num_minima': num_minima, 'num_maxima': num_maxima,
         'threshold_close': threshold_close, 'min_distance_between_minima': min_distance_between_minima,
@@ -380,6 +410,7 @@ if uploaded_files:
     }
 
     if st.sidebar.button("📌 Fix Parameters for this File"):
+        # This will now save the segment_pattern along with all other params
         st.session_state.fixed_params[selected_filename] = current_params
         st.sidebar.success(f"Parameters fixed for {selected_filename}!")
 
@@ -388,6 +419,7 @@ if uploaded_files:
     with tab1:
         st.header(f"Analysis for: `{selected_filename}`")
         selected_file_content = file_dict[selected_filename].getvalue().decode("utf-8")
+        # Pass all current params (including the pattern) to the analysis function
         analysis_results = analyze_file(selected_file_content, selected_filename, **current_params)
         fig_single = create_interactive_plot(analysis_results, **current_params)
         st.plotly_chart(fig_single, use_container_width=True)
@@ -399,8 +431,12 @@ if uploaded_files:
             progress_bar = st.progress(0, text="Analyzing files...")
             for i, filename in enumerate(file_names):
                 file_content = file_dict[filename].getvalue().decode("utf-8")
+                # Get fixed params for the file, or use the currently selected params as default
                 params = st.session_state.fixed_params.get(filename, current_params)
+                
+                # Pass the correct set of params (including the pattern) for *this specific file*
                 res_list = analyze_file(file_content, filename, **params)
+                
                 if res_list:
                     res = res_list[0]
                     all_summary_data.append({
@@ -421,7 +457,4 @@ if uploaded_files:
             else:
                 st.warning("Could not generate summary data. Check files or parameters.")
 else:
-
     st.info("Please upload one or more CSV files to begin.")
-
-
