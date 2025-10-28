@@ -302,7 +302,7 @@ def create_interactive_plot(all_cycles_res, **kwargs):
     for r in range(1, 4):
         for c in range(1, 3):
             fig.update_xaxes(title_text="Voltage (V)", row=r, col=c)
-            fig.update_yaxes(title_text="Current (uA)", row=r, col=c)
+            fig.update_yaxes(title_text="Current (mA)", row=r, col=c)
     return fig
 
 def create_interactive_summary_plots(df):
@@ -350,8 +350,8 @@ def create_interactive_summary_plots(df):
     fig.add_trace(go.Scatter(x=avg_df["log_scan_rate"], y=avg_df["log_red_peak"], mode='lines+markers', name=red_label, line=dict(color='blue', dash='dot'), marker=dict(symbol='star', color='darkblue', size=8)), row=2, col=1)
 
     fig.update_layout(title_text="Peak Current Summary Across All Files", height=900, showlegend=True)
-    fig.update_xaxes(title_text="Scan Rate (V/s)", row=1, col=1); fig.update_yaxes(title_text="Peak Current (uA)", row=1, col=1)
-    fig.update_xaxes(title_text="√Scan Rate (V/s)⁰⁵", row=1, col=2); fig.update_yaxes(title_text="Peak Current (uA)", row=1, col=2)
+    fig.update_xaxes(title_text="Scan Rate (V/s)", row=1, col=1); fig.update_yaxes(title_text="Peak Current (mA)", row=1, col=1)
+    fig.update_xaxes(title_text="√Scan Rate (V/s)⁰⁵", row=1, col=2); fig.update_yaxes(title_text="Peak Current (mA)", row=1, col=2)
     fig.update_xaxes(title_text="log(Scan Rate)", row=2, col=1); fig.update_yaxes(title_text="log(|Peak Current|)", row=2, col=1)
     return fig
 
@@ -463,3 +463,4 @@ if uploaded_files:
                 st.warning("Could not generate summary data. Check files or parameters.")
 else:
     st.info("Please upload one or more CSV files to begin.")
+
