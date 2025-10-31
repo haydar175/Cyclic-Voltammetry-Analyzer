@@ -402,7 +402,7 @@ if uploaded_files:
     
     st.sidebar.subheader("Baseline Correction")
     window_length_ox = st.sidebar.slider('Oxidation Window Length', 0.1, 1.0, params_for_file.get('window_length_ox', 0.6), 0.01)
-    window_length_red = st.sidebar.slider('Reduction Window Length', 0.1, 1.0, params_for_file.get('window_length_red', 1.0), 0.01)
+    window_length_red = st.sidebar.slider('Reduction Window Length', 0.1, 1.0, params_for_file.get('window_length_red', 0.4), 0.01)
 
     # Add the new segment_pattern to the dictionary of current parameters
     current_params = {
@@ -463,4 +463,5 @@ if uploaded_files:
                 st.warning("Could not generate summary data. Check files or parameters.")
 else:
     st.info("Please upload one or more CSV files to begin.")
+
 
