@@ -336,7 +336,8 @@ def create_interactive_plot(all_cycles_res, **kwargs):
     if res["ox_final_selected"]:
         fig.add_trace(go.Scatter(x=[res["ox_v_der2"][i] for i in res["ox_final_selected"]], y=[res["ox_deriv2_smooth"][i] for i in res["ox_final_selected"]], mode='markers', name='Auto Ox Peaks d2', marker=dict(color='darkred', size=8, symbol='circle')), row=1, col=2)
     if res["red_final_selected"]:
-        fig.add_trace(go.Scatter(x=[res["red_v_der2"][i] for i in res["red_final_selected"]], y=[res["red_deriv2_smooth"][i] for i in res["red_deriv2_smooth"]], mode='markers', name='Auto Red Peaks d2', marker=dict(color='navy', size=8, symbol='circle')), row=1, col=2)
+        # **FIXED LINE HERE** - Ensure 'res["red_final_selected"]' is used to index Y-values
+        fig.add_trace(go.Scatter(x=[res["red_v_der2"][i] for i in res["red_final_selected"]], y=[res["red_deriv2_smooth"][i] for i in res["red_final_selected"]], mode='markers', name='Auto Red Peaks d2', marker=dict(color='navy', size=8, symbol='circle')), row=1, col=2)
     
     # --- Plot 3: Peak Detection & Baseline ---
     fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i"], mode='lines', name='Ox raw', line=dict(color='red', width=1)), row=2, col=1)
