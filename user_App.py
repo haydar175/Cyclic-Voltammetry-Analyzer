@@ -142,7 +142,6 @@ def get_baseline_indices(v_segment, left_idx, right_idx):
         
     return start_idx, end_idx
 
-# --- MODIFIED FUNCTION ---
 def apply_baseline_correction(v_segment, i_segment, left_idx, right_idx):
     """
     Applies linear baseline correction by calculating slope from two points 
@@ -180,7 +179,7 @@ def apply_baseline_correction(v_segment, i_segment, left_idx, right_idx):
     return i_baseline
 
 # -----------------------------------------------------------------------------
-# MODIFIED ANALYSIS FUNCTION
+# ANALYSIS FUNCTION (Unchanged)
 # -----------------------------------------------------------------------------
 @st.cache_data
 def analyze_file(file_content, filename,
@@ -310,7 +309,7 @@ def analyze_file(file_content, filename,
     return results
 
 # -----------------------------------------------------------------------------
-# PLOTTING FUNCTIONS (Updated to use the new baseline line)
+# MODIFIED PLOTTING FUNCTION
 # -----------------------------------------------------------------------------
 
 def create_interactive_plot(all_cycles_res, **kwargs):
@@ -319,82 +318,81 @@ def create_interactive_plot(all_cycles_res, **kwargs):
     
     res = all_cycles_res[0]
 
+    # Create a 2x2 grid for the four requested plots
     fig = make_subplots(
-        rows=3, cols=2,
-        subplot_titles=('Raw Data', 'Second Derivative', 'Peak Detection & Baseline',
-                        'Baseline Corrected', 'Subtracted Signal', 'Summary Overlay'),
+        rows=2, cols=2,
+        subplot_titles=('1. Raw Cyclic Voltammogram (I vs V)', '2. Second Derivative (d²I/dV²)', 
+                        '3. Peak Detection and Baseline', '4. Baseline Subtracted Signal (I_sub vs V)'),
         vertical_spacing=0.1, horizontal_spacing=0.1
     )
 
-    # Row 1: Raw Data & Second Derivative (Unchanged)
-    fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i"], mode='lines', name='Oxidation', line=dict(color='red')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i"], mode='lines', name='Reduction', line=dict(color='blue')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=res["ox_v_der2"], y=res["ox_deriv2_smooth"], mode='lines', name='Ox d2', line=dict(color='red')), row=1, col=2)
-    fig.add_trace(go.Scatter(x=res["red_v_der2"], y=res["red_deriv2_smooth"], mode='lines', name='Red d2', line=dict(color='blue')), row=1, col=2)
+    # --- Plot 1: Raw Data ---
+    fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i"], mode='lines', name='Oxidation Raw', line=dict(color='red')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i"], mode='lines', name='Reduction Raw', line=dict(color='blue')), row=1, col=1)
+    
+    # --- Plot 2: Second Derivative ---
+    fig.add_trace(go.Scatter(x=res["ox_v_der2"], y=res["ox_deriv2_smooth"], mode='lines', name='Ox d2', line=dict(color='red'), showlegend=False), row=1, col=2)
+    fig.add_trace(go.Scatter(x=res["red_v_der2"], y=res["red_deriv2_smooth"], mode='lines', name='Red d2', line=dict(color='blue'), showlegend=False), row=1, col=2)
     if res["ox_final_selected"]:
         fig.add_trace(go.Scatter(x=[res["ox_v_der2"][i] for i in res["ox_final_selected"]], y=[res["ox_deriv2_smooth"][i] for i in res["ox_final_selected"]], mode='markers', name='Auto Ox Peaks d2', marker=dict(color='darkred', size=8, symbol='circle')), row=1, col=2)
     if res["red_final_selected"]:
-        fig.add_trace(go.Scatter(x=[res["red_v_der2"][i] for i in res["red_final_selected"]], y=[res["red_deriv2_smooth"][i] for i in res["red_final_selected"]], mode='markers', name='Auto Red Peaks d2', marker=dict(color='navy', size=8, symbol='circle')), row=1, col=2)
+        fig.add_trace(go.Scatter(x=[res["red_v_der2"][i] for i in res["red_final_selected"]], y=[res["red_deriv2_smooth"][i] for i in res["red_deriv2_smooth"]], mode='markers', name='Auto Red Peaks d2', marker=dict(color='navy', size=8, symbol='circle')), row=1, col=2)
     
-    # Row 2, Col 1: Peak Detection & Baseline Line
-    fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i"], mode='lines', name='Ox raw', line=dict(color='red', width=1), showlegend=False), row=2, col=1)
-    fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i"], mode='lines', name='Red raw', line=dict(color='blue', width=1), showlegend=False), row=2, col=1)
+    # --- Plot 3: Peak Detection & Baseline ---
+    fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i"], mode='lines', name='Ox raw', line=dict(color='red', width=1)), row=2, col=1)
+    fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i"], mode='lines', name='Red raw', line=dict(color='blue', width=1)), row=2, col=1)
     
-    # Oxidation Peak and Baseline Points
+    # Oxidation Peak and Baseline Points/Line
     if res["ox_raw_peak_idx"] is not None:
         idx = res["ox_raw_peak_idx"]
         fig.add_trace(go.Scatter(x=[res["ox_v"][idx]], y=[res["ox_i"][idx]], mode='markers', name='Ox Peak', marker=dict(color='red', size=10, symbol='star')), row=2, col=1)
         left, right = res["ox_baseline_pts"]
         if left is not None and right is not None:
-            # Plot the baseline line (now spanning the entire segment range)
-            fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i_corrected"], mode='lines', name='Ox Baseline Line', line=dict(color='black', width=3, dash='dot'), showlegend=True), row=2, col=1)
-            # Plot the two selected points (markers)
+            # Baseline line (spanning the entire segment range)
+            fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i_corrected"], mode='lines', name='Ox Baseline Line', line=dict(color='black', width=3, dash='dot'), showlegend=False), row=2, col=1)
+            # Two selected points (markers)
             baseline_x = [res["ox_v"][left], res["ox_v"][right]]
             baseline_y = [res["ox_i"][left], res["ox_i"][right]]
             fig.add_trace(go.Scatter(x=baseline_x, y=baseline_y, mode='markers', name='Ox Baseline Pts', marker=dict(color='black', size=8)), row=2, col=1)
     
-    # Reduction Peak and Baseline Points
+    # Reduction Peak and Baseline Points/Line
     if res["red_raw_peak_idx"] is not None:
         idx = res["red_raw_peak_idx"]
         fig.add_trace(go.Scatter(x=[res["red_v"][idx]], y=[res["red_i"][idx]], mode='markers', name='Red Peak', marker=dict(color='blue', size=10, symbol='star')), row=2, col=1)
         left, right = res["red_baseline_pts"]
         if left is not None and right is not None:
-            # Plot the baseline line (now spanning the entire segment range)
+            # Baseline line (spanning the entire segment range)
             fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i_corrected"], mode='lines', name='Red Baseline Line', line=dict(color='black', width=3, dash='dot'), showlegend=False), row=2, col=1)
-            # Plot the two selected points (markers)
+            # Two selected points (markers)
             baseline_x = [res["red_v"][left], res["red_v"][right]]
             baseline_y = [res["red_i"][left], res["red_i"][right]]
             fig.add_trace(go.Scatter(x=baseline_x, y=baseline_y, mode='markers', name='Red Baseline Pts', marker=dict(color='black', size=8), showlegend=False), row=2, col=1)
     
-    # Row 2, Col 2: Baseline Corrected (The corrected signal is now Current - Baseline Line)
-    fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i"] - res["ox_i_corrected"], mode='lines', name='Ox Corrected Signal', line=dict(color='red')), row=2, col=2)
-    fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i"] - res["red_i_corrected"], mode='lines', name='Red Corrected Signal', line=dict(color='blue')), row=2, col=2)
-
-    # Row 3, Col 1: Subtracted Signal (renamed to avoid confusion with R2C2, but it's the same data)
-    fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i_subtracted"], mode='lines', name='Ox Subtracted', line=dict(color='red')), row=3, col=1)
-    fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i_subtracted"], mode='lines', name='Red Subtracted', line=dict(color='blue')), row=3, col=1)
+    # --- Plot 4: Subtracted Signal ---
+    fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i_subtracted"], mode='lines', name='Ox Subtracted', line=dict(color='red')), row=2, col=2)
+    fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i_subtracted"], mode='lines', name='Red Subtracted', line=dict(color='blue')), row=2, col=2)
+    # Highlight the resulting I_peak
     if res["ox_raw_peak_idx"] is not None:
         idx = res["ox_raw_peak_idx"]
-        fig.add_trace(go.Scatter(x=[res["ox_v"][idx]], y=[res["ox_i_subtracted"][idx]], mode='markers', name='Ox Sub Peak', marker=dict(color='darkred', size=10)), row=3, col=1)
+        fig.add_trace(go.Scatter(x=[res["ox_v"][idx]], y=[res["ox_i_subtracted"][idx]], mode='markers', name='Ox Sub Peak', marker=dict(color='darkred', size=10)), row=2, col=2)
     if res["red_raw_peak_idx"] is not None:
         idx = res["red_raw_peak_idx"]
-        fig.add_trace(go.Scatter(x=[res["red_v"][idx]], y=[res["red_i_subtracted"][idx]], mode='markers', name='Red Sub Peak', marker=dict(color='darkblue', size=10)), row=3, col=1)
+        fig.add_trace(go.Scatter(x=[res["red_v"][idx]], y=[res["red_i_subtracted"][idx]], mode='markers', name='Red Sub Peak', marker=dict(color='darkblue', size=10)), row=2, col=2)
     
-    # Row 3, Col 2: Summary Overlay (Original vs Subtracted)
-    fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i"], mode='lines', name='Original Ox', line=dict(color='red', dash='dash')), row=3, col=2)
-    fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i_subtracted"], mode='lines', name='Subtracted Ox', line=dict(color='red')), row=3, col=2)
-    fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i"], mode='lines', name='Original Red', line=dict(color='blue', dash='dash')), row=3, col=2)
-    fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i_subtracted"], mode='lines', name='Subtracted Red', line=dict(color='blue')), row=3, col=2)
-    
-    fig.update_layout(height=1200, showlegend=True, title_text=f"{res['filename']} - {res['cycle_label']} (Scan Rate: {res['scan_rate']} V/s)")
-    for r in range(1, 4):
+    # Update layout and axes
+    fig.update_layout(height=800, showlegend=True, title_text=f"CV Analysis for: {res['filename']} - {res['cycle_label']} (Scan Rate: {res['scan_rate']} V/s)")
+    for r in range(1, 3):
         for c in range(1, 3):
             fig.update_xaxes(title_text="Voltage (V)", row=r, col=c)
             fig.update_yaxes(title_text="Current (mA)", row=r, col=c)
+    
+    # Manually adjust y-axis label for d2I/dV2 plot since it's not strictly current
+    fig.update_yaxes(title_text="d²I/dV² (mA/V²)", row=1, col=2)
+    
     return fig
 
 # -----------------------------------------------------------------------------
-# PLOTTING FUNCTIONS (Unchanged)
+# REMAINDER OF STREAMLIT UI (Unchanged)
 # -----------------------------------------------------------------------------
 
 def create_interactive_summary_plots(df):
@@ -445,7 +443,7 @@ def create_interactive_summary_plots(df):
     return fig
 
 # -----------------------------------------------------------------------------
-# STREAMLIT USER INTERFACE (Unchanged from the previous modification)
+# STREAMLIT USER INTERFACE (Unchanged)
 # -----------------------------------------------------------------------------
 
 st.set_page_config(layout="wide")
