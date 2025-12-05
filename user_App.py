@@ -102,24 +102,20 @@ def select_top_peaks_by_distance(v, candidate_indices, min_distance, num_peaks):
     return selected
 
 def find_side_points_raw(v_raw, i_raw, peak_raw_idx, window_length):
-    """Finds the side points for baseline correction."""
+    """
+    Finds the side points for baseline correction using the automatic window method.
+    Returns the indices of the points closest to the window edges in voltage.
+    """
     if peak_raw_idx is None or not (0 <= peak_raw_idx < len(v_raw)):
         return None, None
     
-    v0, i0 = v_raw[peak_raw_idx], i_raw[peak_raw_idx]
+    v0 = v_raw[peak_raw_idx]
     v_left, v_right = v0 - window_length / 2, v0 + window_length / 2
 
     mask_left = (v_raw >= v_left) & (v_raw < v0)
     mask_right = (v_raw > v0) & (v_raw <= v_right)
-
-    if not (np.any(mask_left) and np.any(mask_right)):
-        return None, None
     
-    # OLD LOGIC (Window-based point)
-    # left_idx = np.where(mask_left)[0][np.argmax(np.abs(i_raw[mask_left] - i0))]
-    # right_idx = np.where(mask_right)[0][np.argmax(np.abs(i_raw[mask_right] - i0))]
-
-    # NEW LOGIC (Closest to the window edge in V)
+    # Target voltage values for the baseline points
     left_v_target = v_left
     right_v_target = v_right
     
@@ -128,34 +124,60 @@ def find_side_points_raw(v_raw, i_raw, peak_raw_idx, window_length):
     
     return left_idx, right_idx
 
+def get_baseline_indices(v_segment, left_idx, right_idx):
+    """
+    Determines the two indices defining the baseline line. 
+    It ensures that left_idx corresponds to the starting point (lower V).
+    """
+    if left_idx is None or right_idx is None:
+        return None, None
+    
+    v_left, v_right = v_segment[left_idx], v_segment[right_idx]
+    
+    # Identify which of the two selected points is the chronological start/end
+    if v_left < v_right:
+        start_idx, end_idx = left_idx, right_idx
+    else:
+        start_idx, end_idx = right_idx, left_idx
+        
+    return start_idx, end_idx
+
+# --- MODIFIED FUNCTION ---
 def apply_baseline_correction(v_segment, i_segment, left_idx, right_idx):
-    """Applies linear baseline correction and returns the composite signal."""
-    corrected_i = i_segment.copy()
+    """
+    Applies linear baseline correction by calculating slope from two points 
+    and applying the linear function (baseline) across the entire segment.
+    """
+    i_baseline = i_segment.copy()
     
     if left_idx is None or right_idx is None:
-        return corrected_i
+        # If no points are provided, the baseline is the raw current itself.
+        return i_segment.copy()
 
     # Ensure indices are within bounds
     if not (0 <= left_idx < len(v_segment) and 0 <= right_idx < len(v_segment)):
-        return corrected_i
+        return i_segment.copy()
 
-    x_left, x_right = v_segment[left_idx], v_segment[right_idx]
-    y_left, y_right = i_segment[left_idx], i_segment[right_idx]
+    # Determine chronological start and end indices of the selected points
+    # This is important for calculating the line equation
+    start_idx, end_idx = get_baseline_indices(v_segment, left_idx, right_idx)
     
-    if x_right == x_left:
-        return corrected_i
+    x1, x2 = v_segment[start_idx], v_segment[end_idx]
+    y1, y2 = i_segment[start_idx], i_segment[end_idx]
     
-    slope = (y_right - y_left) / (x_right - x_left)
-    intercept = y_left - slope * x_left
+    if x2 == x1:
+        # Avoid division by zero: if V points are the same, use a constant baseline
+        slope = 0
+        intercept = y1
+    else:
+        # Compute the slope and intercept
+        slope = (y2 - y1) / (x2 - x1)
+        intercept = y1 - slope * x1
     
-    start_v, end_v = min(x_left, x_right), max(x_left, x_right)
-    # Mask should cover the entire region between the two baseline points
-    mask = (v_segment >= min(v_segment[left_idx], v_segment[right_idx])) & \
-           (v_segment <= max(v_segment[left_idx], v_segment[right_idx]))
+    # Apply the linear function (y = slope * x + intercept) to all voltage points
+    i_baseline = slope * v_segment + intercept
     
-    corrected_i[mask] = slope * v_segment[mask] + intercept
-        
-    return corrected_i
+    return i_baseline
 
 # -----------------------------------------------------------------------------
 # MODIFIED ANALYSIS FUNCTION
@@ -168,8 +190,8 @@ def analyze_file(file_content, filename,
                  min_distance_between_minima=0.03,
                  num_peaks_ox=1, num_peaks_red=1,
                  window_length_ox=0.2, window_length_red=0.2,
-                 manual_ox_peak_v=None, manual_red_peak_v=None, # New arguments
-                 manual_ox_baseline_v=None, manual_red_baseline_v=None # New arguments for baseline
+                 manual_ox_peak_v=None, manual_red_peak_v=None,
+                 manual_ox_baseline_v=None, manual_red_baseline_v=None
                  ):
     
     data = pd.read_csv(StringIO(file_content), engine='python').dropna()
@@ -186,12 +208,12 @@ def analyze_file(file_content, filename,
     current = data.iloc[:, cycle_info['current']].astype(float).values
     
     if segment_pattern == "A":
-        segments = [(0, 109), (110, 210), (211, 317), (318, 399)] ### Pattern A
+        segments = [(0, 109), (110, 210), (211, 317), (318, 399)]
     elif segment_pattern == "B":
-        segments = [(0, 99), (100, 199), (200, 299), (300, 399)] ### Pattern B
+        segments = [(0, 99), (100, 199), (200, 299), (300, 399)]
     else:
         st.warning(f"Invalid pattern '{segment_pattern}'. Defaulting to 'A'.")
-        segments = [(0, 109), (110, 210), (211, 317), (318, 399)] ### Pattern A
+        segments = [(0, 109), (110, 210), (211, 317), (318, 399)]
 
     ox_v = np.concatenate([voltage[s:e+1] for s, e in [segments[3], segments[0]]])
     ox_i = np.concatenate([current[s:e+1] for s, e in [segments[3], segments[0]]])
@@ -201,9 +223,7 @@ def analyze_file(file_content, filename,
     current_window_ox = window_length_ox + (extracted_value * 0.1)
     current_window_red = window_length_red + (extracted_value * 0.1)
     
-    # -----------------------------------------------------------
-    # AUTOMATIC PEAK DETECTION (Needed for automatic selection logic)
-    # -----------------------------------------------------------
+    # --- Automatic Peak Detection (for potential fallback) ---
     ox_v_der1, ox_deriv1 = compute_derivative(ox_i, ox_v)
     ox_deriv1_smooth = moving_average(ox_deriv1, window_size=smooth_window)
     ox_v_der2, ox_deriv2 = compute_second_derivative(ox_v_der1, ox_deriv1_smooth)
@@ -222,62 +242,48 @@ def analyze_file(file_content, filename,
     red_best_minima, _ = select_minima_by_slope(red_v_der2, red_deriv2_smooth, red_min_indices, None, window_size=slope_window)
     red_final_selected = select_top_peaks_by_distance(red_v_der2, red_best_minima, min_distance_between_minima, num_peaks_red)
     
-    # -----------------------------------------------------------
-    # PEAK SELECTION LOGIC (Manual Override)
-    # -----------------------------------------------------------
+    # --- Peak Selection Logic (Manual Override) ---
     ox_raw_peak_idx, red_raw_peak_idx = None, None
-    
-    # 1. Oxidation Peak Selection
     if manual_ox_peak_v is not None:
-        # Use manually selected voltage to find the closest index in the raw data
         ox_raw_peak_idx = np.argmin(np.abs(ox_v - manual_ox_peak_v))
-        # Keep the automatically found second derivative peak for plotting if available
     elif ox_final_selected:
-        # Fall back to automatic detection if no manual selection
         raw_idxs = [np.argmin(np.abs(ox_v - ox_v_der2[idx])) for idx in ox_final_selected]
         ox_raw_peak_idx = raw_idxs[np.argmax([abs(ox_i[r]) for r in raw_idxs])]
 
-    # 2. Reduction Peak Selection
     if manual_red_peak_v is not None:
         red_raw_peak_idx = np.argmin(np.abs(red_v - manual_red_peak_v))
     elif red_final_selected:
         raw_idxs = [np.argmin(np.abs(red_v - red_v_der2[idx])) for idx in red_final_selected]
         red_raw_peak_idx = raw_idxs[np.argmax([abs(red_i[r]) for r in raw_idxs])]
     
-    # -----------------------------------------------------------
-    # BASELINE SELECTION LOGIC (Manual Override)
-    # -----------------------------------------------------------
-    
-    # 3. Baseline Selection - Ox
+    # --- Baseline Selection Logic (Manual Override) ---
     ox_side_raw = None
     if ox_raw_peak_idx is not None:
         if manual_ox_baseline_v is not None and len(manual_ox_baseline_v) == 2:
+            # Manual baseline selection
             left_v, right_v = manual_ox_baseline_v
-            # Find the closest raw index for the manual baseline points
             left_idx = np.argmin(np.abs(ox_v - left_v))
             right_idx = np.argmin(np.abs(ox_v - right_v))
-            # The indices for baseline correction are the raw data indices
             ox_side_raw = (left_idx, right_idx)
         else:
-            # Fall back to automatic baseline selection if no manual selection
+            # Automatic baseline selection
             ox_side_raw = find_side_points_raw(ox_v, ox_i, ox_raw_peak_idx, current_window_ox)
 
-    # 4. Baseline Selection - Red
     red_side_raw = None
     if red_raw_peak_idx is not None:
         if manual_red_baseline_v is not None and len(manual_red_baseline_v) == 2:
+            # Manual baseline selection
             left_v, right_v = manual_red_baseline_v
-            # Find the closest raw index for the manual baseline points
             left_idx = np.argmin(np.abs(red_v - left_v))
             right_idx = np.argmin(np.abs(red_v - right_v))
             red_side_raw = (left_idx, right_idx)
         else:
+            # Automatic baseline selection
             red_side_raw = find_side_points_raw(red_v, red_i, red_raw_peak_idx, current_window_red)
     
-    # -----------------------------------------------------------
-    # BASELINE CORRECTION & RESULTS
-    # -----------------------------------------------------------
+    # --- Baseline Correction & Results ---
     
+    # Use the MODIFIED apply_baseline_correction function
     ox_i_corrected = apply_baseline_correction(ox_v, ox_i, ox_side_raw[0] if ox_side_raw else None, ox_side_raw[1] if ox_side_raw else None)
     red_i_corrected = apply_baseline_correction(red_v, red_i, red_side_raw[0] if red_side_raw else None, red_side_raw[1] if red_side_raw else None)
     
@@ -298,14 +304,13 @@ def analyze_file(file_content, filename,
         "ox_final_selected": ox_final_selected, "red_final_selected": red_final_selected,
         "ox_subtracted_peak": ox_subtracted_peak, "red_subtracted_peak": red_subtracted_peak,
         "window_length_ox": current_window_ox, "window_length_red": current_window_red,
-        # Save manual baseline points for plotting if they were used
         "ox_baseline_pts": ox_side_raw, 
         "red_baseline_pts": red_side_raw
     })
     return results
 
 # -----------------------------------------------------------------------------
-# MODIFIED PLOTTING FUNCTION TO USE CUSTOM BASELINE POINTS
+# PLOTTING FUNCTIONS (Updated to use the new baseline line)
 # -----------------------------------------------------------------------------
 
 def create_interactive_plot(all_cycles_res, **kwargs):
@@ -321,6 +326,7 @@ def create_interactive_plot(all_cycles_res, **kwargs):
         vertical_spacing=0.1, horizontal_spacing=0.1
     )
 
+    # Row 1: Raw Data & Second Derivative (Unchanged)
     fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i"], mode='lines', name='Oxidation', line=dict(color='red')), row=1, col=1)
     fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i"], mode='lines', name='Reduction', line=dict(color='blue')), row=1, col=1)
     fig.add_trace(go.Scatter(x=res["ox_v_der2"], y=res["ox_deriv2_smooth"], mode='lines', name='Ox d2', line=dict(color='red')), row=1, col=2)
@@ -330,6 +336,7 @@ def create_interactive_plot(all_cycles_res, **kwargs):
     if res["red_final_selected"]:
         fig.add_trace(go.Scatter(x=[res["red_v_der2"][i] for i in res["red_final_selected"]], y=[res["red_deriv2_smooth"][i] for i in res["red_final_selected"]], mode='markers', name='Auto Red Peaks d2', marker=dict(color='navy', size=8, symbol='circle')), row=1, col=2)
     
+    # Row 2, Col 1: Peak Detection & Baseline Line
     fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i"], mode='lines', name='Ox raw', line=dict(color='red', width=1), showlegend=False), row=2, col=1)
     fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i"], mode='lines', name='Red raw', line=dict(color='blue', width=1), showlegend=False), row=2, col=1)
     
@@ -337,13 +344,13 @@ def create_interactive_plot(all_cycles_res, **kwargs):
     if res["ox_raw_peak_idx"] is not None:
         idx = res["ox_raw_peak_idx"]
         fig.add_trace(go.Scatter(x=[res["ox_v"][idx]], y=[res["ox_i"][idx]], mode='markers', name='Ox Peak', marker=dict(color='red', size=10, symbol='star')), row=2, col=1)
-        left, right = res["ox_baseline_pts"] # Use the calculated/manual baseline points
+        left, right = res["ox_baseline_pts"]
         if left is not None and right is not None:
+            # Plot the baseline line (now spanning the entire segment range)
+            fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i_corrected"], mode='lines', name='Ox Baseline Line', line=dict(color='black', width=3, dash='dot'), showlegend=True), row=2, col=1)
+            # Plot the two selected points (markers)
             baseline_x = [res["ox_v"][left], res["ox_v"][right]]
             baseline_y = [res["ox_i"][left], res["ox_i"][right]]
-            # Plot the line (baseline)
-            fig.add_trace(go.Scatter(x=baseline_x, y=baseline_y, mode='lines', name='Ox Baseline', line=dict(color='black', width=3, dash='dot')), row=2, col=1)
-            # Plot the baseline points (markers)
             fig.add_trace(go.Scatter(x=baseline_x, y=baseline_y, mode='markers', name='Ox Baseline Pts', marker=dict(color='black', size=8)), row=2, col=1)
     
     # Reduction Peak and Baseline Points
@@ -352,16 +359,18 @@ def create_interactive_plot(all_cycles_res, **kwargs):
         fig.add_trace(go.Scatter(x=[res["red_v"][idx]], y=[res["red_i"][idx]], mode='markers', name='Red Peak', marker=dict(color='blue', size=10, symbol='star')), row=2, col=1)
         left, right = res["red_baseline_pts"]
         if left is not None and right is not None:
+            # Plot the baseline line (now spanning the entire segment range)
+            fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i_corrected"], mode='lines', name='Red Baseline Line', line=dict(color='black', width=3, dash='dot'), showlegend=False), row=2, col=1)
+            # Plot the two selected points (markers)
             baseline_x = [res["red_v"][left], res["red_v"][right]]
             baseline_y = [res["red_i"][left], res["red_i"][right]]
-            # Plot the line (baseline)
-            fig.add_trace(go.Scatter(x=baseline_x, y=baseline_y, mode='lines', name='Red Baseline', line=dict(color='black', width=3, dash='dot'), showlegend=False), row=2, col=1)
-            # Plot the baseline points (markers)
             fig.add_trace(go.Scatter(x=baseline_x, y=baseline_y, mode='markers', name='Red Baseline Pts', marker=dict(color='black', size=8), showlegend=False), row=2, col=1)
     
-    fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i_corrected"], mode='lines', name='Ox Baseline Line', line=dict(color='red')), row=2, col=2)
-    fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i_corrected"], mode='lines', name='Red Baseline Line', line=dict(color='blue')), row=2, col=2)
+    # Row 2, Col 2: Baseline Corrected (The corrected signal is now Current - Baseline Line)
+    fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i"] - res["ox_i_corrected"], mode='lines', name='Ox Corrected Signal', line=dict(color='red')), row=2, col=2)
+    fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i"] - res["red_i_corrected"], mode='lines', name='Red Corrected Signal', line=dict(color='blue')), row=2, col=2)
 
+    # Row 3, Col 1: Subtracted Signal (renamed to avoid confusion with R2C2, but it's the same data)
     fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i_subtracted"], mode='lines', name='Ox Subtracted', line=dict(color='red')), row=3, col=1)
     fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i_subtracted"], mode='lines', name='Red Subtracted', line=dict(color='blue')), row=3, col=1)
     if res["ox_raw_peak_idx"] is not None:
@@ -371,6 +380,7 @@ def create_interactive_plot(all_cycles_res, **kwargs):
         idx = res["red_raw_peak_idx"]
         fig.add_trace(go.Scatter(x=[res["red_v"][idx]], y=[res["red_i_subtracted"][idx]], mode='markers', name='Red Sub Peak', marker=dict(color='darkblue', size=10)), row=3, col=1)
     
+    # Row 3, Col 2: Summary Overlay (Original vs Subtracted)
     fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i"], mode='lines', name='Original Ox', line=dict(color='red', dash='dash')), row=3, col=2)
     fig.add_trace(go.Scatter(x=res["ox_v"], y=res["ox_i_subtracted"], mode='lines', name='Subtracted Ox', line=dict(color='red')), row=3, col=2)
     fig.add_trace(go.Scatter(x=res["red_v"], y=res["red_i"], mode='lines', name='Original Red', line=dict(color='blue', dash='dash')), row=3, col=2)
@@ -410,7 +420,6 @@ def create_interactive_summary_plots(df):
 
     ox_label, red_label = "log(Avg Ox Peak)", "log(Avg Red Peak)"
     if len(avg_df) > 1:
-        # Filter out inf/-inf before linregress
         finite_ox_mask = np.isfinite(avg_df['log_scan_rate']) & np.isfinite(avg_df['log_ox_peak'])
         finite_red_mask = np.isfinite(avg_df['log_scan_rate']) & np.isfinite(avg_df['log_red_peak'])
 
@@ -421,13 +430,11 @@ def create_interactive_summary_plots(df):
             red_slope = stats.linregress(avg_df.loc[finite_red_mask, 'log_scan_rate'], avg_df.loc[finite_red_mask, 'log_red_peak']).slope
             red_label = f'log(Avg Red Peak) | Slope: {red_slope:.3f}'
 
-    # Changed mode from 'markers' to 'lines+markers'
     fig.add_trace(go.Scatter(x=df["Scan Rate (V/s)"], y=df["Ox Subtracted Peak"], mode='lines+markers', name='Ox Peaks', marker=dict(color='red')), row=1, col=1)
     fig.add_trace(go.Scatter(x=df["Scan Rate (V/s)"], y=df["Red Subtracted Peak"], mode='lines+markers', name='Red Peaks', marker=dict(color='blue')), row=1, col=1)
     fig.add_trace(go.Scatter(x=df["sqrt(Scan Rate)"], y=df["Ox Subtracted Peak"], mode='lines+markers', name='Ox Peaks', marker=dict(color='red'), showlegend=False), row=1, col=2)
     fig.add_trace(go.Scatter(x=df["sqrt(Scan Rate)"], y=df["Red Subtracted Peak"], mode='lines+markers', name='Red Peaks', marker=dict(color='blue'), showlegend=False), row=1, col=2)
     
-    # This plot already had lines, so it is unchanged
     fig.add_trace(go.Scatter(x=avg_df["log_scan_rate"], y=avg_df["log_ox_peak"], mode='lines+markers', name=ox_label, line=dict(color='red', dash='dot'), marker=dict(symbol='star', color='darkred', size=8)), row=2, col=1)
     fig.add_trace(go.Scatter(x=avg_df["log_scan_rate"], y=avg_df["log_red_peak"], mode='lines+markers', name=red_label, line=dict(color='blue', dash='dot'), marker=dict(symbol='star', color='darkblue', size=8)), row=2, col=1)
 
@@ -438,7 +445,7 @@ def create_interactive_summary_plots(df):
     return fig
 
 # -----------------------------------------------------------------------------
-# MODIFIED STREAMLIT USER INTERFACE 
+# STREAMLIT USER INTERFACE (Unchanged from the previous modification)
 # -----------------------------------------------------------------------------
 
 st.set_page_config(layout="wide")
@@ -501,20 +508,22 @@ if uploaded_files:
 
     # 2. Allow the user to select the starting point of the baseline (Oxidation - using two points for a line)
     st.sidebar.markdown('**Oxidation Baseline Points (V)**')
-    manual_ox_baseline_v1 = st.sidebar.number_input('Ox Baseline Start V', 
-                                                    value=manual_params_for_file.get('manual_ox_baseline_v', [None, None])[0],
+    manual_ox_baseline_v_saved = manual_params_for_file.get('manual_ox_baseline_v', [None, None])
+    manual_ox_baseline_v1 = st.sidebar.number_input('Ox Baseline Point 1 V', 
+                                                    value=manual_ox_baseline_v_saved[0],
                                                     format="%.4f", step=0.01)
-    manual_ox_baseline_v2 = st.sidebar.number_input('Ox Baseline End V', 
-                                                    value=manual_params_for_file.get('manual_ox_baseline_v', [None, None])[1],
+    manual_ox_baseline_v2 = st.sidebar.number_input('Ox Baseline Point 2 V', 
+                                                    value=manual_ox_baseline_v_saved[1],
                                                     format="%.4f", step=0.01)
     
     # 2. Allow the user to select the starting point of the baseline (Reduction - using two points for a line)
     st.sidebar.markdown('**Reduction Baseline Points (V)**')
-    manual_red_baseline_v1 = st.sidebar.number_input('Red Baseline Start V', 
-                                                     value=manual_params_for_file.get('manual_red_baseline_v', [None, None])[0],
+    manual_red_baseline_v_saved = manual_params_for_file.get('manual_red_baseline_v', [None, None])
+    manual_red_baseline_v1 = st.sidebar.number_input('Red Baseline Point 1 V', 
+                                                     value=manual_red_baseline_v_saved[0],
                                                      format="%.4f", step=0.01)
-    manual_red_baseline_v2 = st.sidebar.number_input('Red Baseline End V', 
-                                                     value=manual_params_for_file.get('manual_red_baseline_v', [None, None])[1],
+    manual_red_baseline_v2 = st.sidebar.number_input('Red Baseline Point 2 V', 
+                                                     value=manual_red_baseline_v_saved[1],
                                                      format="%.4f", step=0.01)
     
     # Clean up manual inputs for passing to the function
@@ -540,7 +549,6 @@ if uploaded_files:
 
     # Save fixed parameters
     if st.sidebar.button("📌 Fix Automatic Parameters for this File"):
-        # This saves the non-manual parameters
         st.session_state.fixed_params[selected_filename] = current_params
         st.sidebar.success(f"Automatic parameters fixed for {selected_filename}!")
 
@@ -576,8 +584,7 @@ if uploaded_files:
         st.header(f"Analysis for: `{selected_filename}`")
         selected_file_content = file_dict[selected_filename].getvalue().decode("utf-8")
         
-        # 4. Once confirm proceed with the rest of the anaylsi and the figures plotting
-        # Single file analysis always runs to show the user the results.
+        # 4. Proceed with the analysis and plotting
         analysis_results = analyze_file(selected_file_content, selected_filename, **run_params)
         fig_single = create_interactive_plot(analysis_results, **run_params)
         st.plotly_chart(fig_single, use_container_width=True)
@@ -598,7 +605,7 @@ if uploaded_files:
                 for i, filename in enumerate(confirmed_file_names):
                     file_content = file_dict[filename].getvalue().decode("utf-8")
                     
-                    # Use the fixed parameters OR the currently set/saved manual parameters
+                    # Use the fixed/saved parameters for this file
                     params = st.session_state.fixed_params.get(filename, current_params)
                     manual_p = st.session_state.manual_params.get(filename, {})
                     final_params = params.copy()
